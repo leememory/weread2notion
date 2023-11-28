@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import re
 import time
 from notion_client import Client
@@ -131,7 +132,7 @@ def get_quote(content):
 
 def get_callout(content, style, colorStyle, reviewId):
     # 根据不同的划线样式设置不同的emoji 直线type=0 背景颜色是1 波浪线是2
-    emoji = "🌟"
+    emoji = "〰️"
     if style == 0:
         emoji = "💡"
     elif style == 1:
@@ -325,6 +326,11 @@ def get_children(chapter, summary, bookmark_list):
                 children.append(get_heading(
                     chapter.get(key).get("level"), chapter.get(key).get("title")))
             for i in value:
+                if(data.get("reviewId")==None and "style" in i and "colorStyle" in i):
+                    if(i.get("style") not in styles):
+                        continue
+                    if(i.get("colorStyle") not in colors):
+                        continue
                 markText = i.get("markText")
                 for j in range(0, len(markText)//2000+1):
                     children.append(get_callout(markText[j*2000:(j+1)*2000],i.get("style"), i.get("colorStyle"), i.get("reviewId")))
@@ -335,9 +341,14 @@ def get_children(chapter, summary, bookmark_list):
     else:
         # 如果没有章节信息
         for data in bookmark_list:
+            if(data.get("reviewId")==None and "style" in data and "colorStyle" in data):
+                if(data.get("style") not in styles):
+                    continue
+                if(data.get("colorStyle") not in colors):
+                    continue
             markText = data.get("markText")
             for i in range(0, len(markText)//2000+1):
-                children.append(get_callout(markText[i*200:(i+1)*2000],
+                children.append(get_callout(markText[i*2000:(i+1)*2000],
                                 data.get("style"), data.get("colorStyle"), data.get("reviewId")))
     if summary != None and len(summary) > 0:
         children.append(get_heading(1, "点评"))
@@ -388,15 +399,48 @@ def calculate_book_str_id(book_id):
     result += md5.hexdigest()[0:3]
     return result
 
+def download_image(url, save_dir='cover'):
+    # 确保目录存在，如果不存在则创建
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    # 获取文件名，使用 URL 最后一个 '/' 之后的字符串
+    file_name = url.split('/')[-1]+".jpg"
+    save_path = os.path.join(save_dir, file_name)
+
+    # 检查文件是否已经存在，如果存在则不进行下载
+    if os.path.exists(save_path):
+        print(f"File {file_name} already exists. Skipping download.")
+        return save_path
+
+    response = requests.get(url, stream=True)
+    if response.status_code == 200:
+        with open(save_path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=128):
+                file.write(chunk)
+        print(f"Image downloaded successfully to {save_path}")
+    else:
+        print(f"Failed to download image. Status code: {response.status_code}")
+    return save_path
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("weread_cookie")
     parser.add_argument("notion_token")
     parser.add_argument("database_id")
+    parser.add_argument("ref")
+    parser.add_argument("repository")
+    parser.add_argument("--styles",nargs="+",type=int,help="划线样式")
+    parser.add_argument("--colors",nargs="+",type=int,help="划线颜色")
     options = parser.parse_args()
     weread_cookie = options.weread_cookie
     database_id = options.database_id
     notion_token = options.notion_token
+    ref = options.ref
+    branch = ref.split('/')[-1]
+    repository = options.repository
+    styles = options.styles
+    colors = options.colors
     session = requests.Session()
     session.cookies = parse_cookie_string(weread_cookie)
     client = Client(
@@ -418,6 +462,10 @@ if __name__ == "__main__":
             cover = book.get("cover")
             if book.get("author") == "公众号" and book.get("cover").endswith("/0"):
                 cover += ".jpg"
+            if(cover.startswith("http") and not cover.endswith(".jpg")):
+                path = download_image(cover)
+                cover = f"https://raw.githubusercontent.com/{repository}/{branch}/{path}"
+                print(cover)
             bookId = book.get("bookId")
             author = book.get("author")
             categories = book.get("categories")
